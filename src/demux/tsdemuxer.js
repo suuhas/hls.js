@@ -12,7 +12,7 @@
  import ADTS from './adts';
  import Event from '../events';
  import ExpGolomb from './exp-golomb';
- import Hex from '../utils/hex';
+ //import Hex from '../utils/hex';
  import {logger} from '../utils/logger';
  import {ErrorTypes, ErrorDetails} from '../errors';
 
@@ -321,13 +321,15 @@
         length = 0,
         expGolombDecoder,
         avcSample,
+        tmp,
+        i,
         push;
 
 
     if (overFlow) {
       logger.log('append overflow data @ beginning of PES:' + overFlow.byteLength);
       // append preceding overflowing data to beginning of PES
-      var tmp = new Uint8Array(pes.data.byteLength + overFlow.byteLength);
+      tmp = new Uint8Array(pes.data.byteLength + overFlow.byteLength);
       tmp.set(overFlow, 0);
       tmp.set(pes.data, overFlow.byteLength);
       pes.data = tmp;
@@ -341,7 +343,7 @@
       logger.log('append underflow data to previous NAL');
       var lastavcSample = samples[samples.length - 1];
       var lastUnit = lastavcSample.units.units[lastavcSample.units.units.length - 1];
-      var tmp = new Uint8Array(lastUnit.data.byteLength + underFlow.byteLength);
+      tmp = new Uint8Array(lastUnit.data.byteLength + underFlow.byteLength);
       tmp.set(lastUnit.data, 0);
       tmp.set(underFlow, lastUnit.data.byteLength);
       lastUnit.data = tmp;
