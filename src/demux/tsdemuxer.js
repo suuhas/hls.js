@@ -12,7 +12,7 @@
  import ADTS from './adts';
  import Event from '../events';
  import ExpGolomb from './exp-golomb';
-// import Hex from '../utils/hex';
+ import Hex from '../utils/hex';
  import {logger} from '../utils/logger';
  import {ErrorTypes, ErrorDetails} from '../errors';
 
@@ -311,27 +311,47 @@
   _parseAVCPES(pes) {
     var track = this._avcTrack,
         samples = track.samples,
-        units = this._parseAVCNALu(pes.data),
+        naluData,
+        units,
+        underFlow,
+        overFlow = this.avcOverFlow,
         units2 = [],
-        debug = false,
+        debug = true,
         key = false,
         length = 0,
         expGolombDecoder,
         avcSample,
-        push,
-        i;
+        push;
+
+
+    if (overFlow) {
+      logger.log('append overflow data @ beginning of PES:' + overFlow.byteLength);
+      // append preceding overflowing data to beginning of PES
+      var tmp = new Uint8Array(pes.data.byteLength + overFlow.byteLength);
+      tmp.set(overFlow, 0);
+      tmp.set(pes.data, overFlow.byteLength);
+      pes.data = tmp;
+    }
+
+    naluData = this._parseAVCNALu(pes.data);
     // no NALu found
-    if (units.length === 0 && samples.length > 0) {
-      // append pes.data to previous NAL unit
+    underFlow = naluData.underflow;
+    if (underFlow && samples.length > 0) {
+      // append underflow data to previous NAL unit
+      logger.log('append underflow data to previous NAL');
       var lastavcSample = samples[samples.length - 1];
       var lastUnit = lastavcSample.units.units[lastavcSample.units.units.length - 1];
-      var tmp = new Uint8Array(lastUnit.data.byteLength + pes.data.byteLength);
+      var tmp = new Uint8Array(lastUnit.data.byteLength + underFlow.byteLength);
       tmp.set(lastUnit.data, 0);
-      tmp.set(pes.data, lastUnit.data.byteLength);
+      tmp.set(underFlow, lastUnit.data.byteLength);
       lastUnit.data = tmp;
-      lastavcSample.units.length += pes.data.byteLength;
-      track.len += pes.data.byteLength;
+      lastavcSample.units.length += underFlow.byteLength;
+      track.len += underFlow.byteLength;
     }
+    this.avcOverFlow = naluData.overflow;
+
+    units = naluData.units;
+
     //free pes.data to save up some memory
     pes.data = null;
     var debugString = '';
@@ -485,8 +505,9 @@
 
 
   _parseAVCNALu(array) {
-    var i = 0, len = array.byteLength, value, overflow, state = 0;
-    var units = [], unit, unitType, lastUnitStart, lastUnitType;
+    var i = 0, len = array.byteLength, value, state = 0;
+    var units = [], unit, unitType, lastUnitStart, lastUnitType, underFlowData, overFlowData;
+
     //logger.log('PES:' + Hex.hexDump(array));
     while (i < len) {
       value = array[i++];
@@ -516,23 +537,11 @@
               //logger.log('pushing NALU, type/size:' + unit.type + '/' + unit.data.byteLength);
               units.push(unit);
             } else {
-              // If NAL units are not starting right at the beginning of the PES packet, push preceding data into previous NAL unit.
-              overflow  = i - state - 1;
-              if (overflow) {
-                var track = this._avcTrack,
-                    samples = track.samples;
-                //logger.log('first NALU found with overflow:' + overflow);
-                if (samples.length) {
-                  var lastavcSample = samples[samples.length - 1],
-                      lastUnits = lastavcSample.units.units,
-                      lastUnit = lastUnits[lastUnits.length - 1],
-                      tmp = new Uint8Array(lastUnit.data.byteLength + overflow);
-                  tmp.set(lastUnit.data, 0);
-                  tmp.set(array.subarray(0, overflow), lastUnit.data.byteLength);
-                  lastUnit.data = tmp;
-                  lastavcSample.units.length += overflow;
-                  track.len += overflow;
-                }
+              // If first NAL unit are not starting right at the beginning of the PES packet, extract underflow data
+              var underflow  = i - state - 1;
+              if (underflow) {
+                logger.log('underflow before first NALU:' + underflow);
+                underFlowData = array.subarray(0, underflow);
               }
             }
             lastUnitStart = i;
@@ -547,11 +556,19 @@
       }
     }
     if (lastUnitStart) {
-      unit = {data: array.subarray(lastUnitStart, len), type: lastUnitType};
-      units.push(unit);
-      //logger.log('pushing NALU, type/size:' + unit.type + '/' + unit.data.byteLength);
+      if (state === 0) {
+        unit = {data: array.subarray(lastUnitStart, len), type: lastUnitType};
+        units.push(unit);
+        logger.log('pushing NALU, type/size:' + unit.type + '/' + unit.data.byteLength);
+      } else {
+        // potential start code detected at the end of this PES packet. let's treat this as overflow
+        logger.log('overflow found');
+        overFlowData = array.subarray(lastUnitStart-3, len);
+      }
+    } else {
+      underFlowData = array;
     }
-    return units;
+    return { units : units , underflow : underFlowData, overflow : overFlowData};
   }
 
   _parseAACPES(pes) {
