@@ -316,7 +316,7 @@
         underFlow,
         overFlow = this.avcOverFlow,
         units2 = [],
-        debug = true,
+        debug = false,
         key = false,
         length = 0,
         expGolombDecoder,
@@ -381,6 +381,7 @@
           if(debug) {
             debugString += 'SEI ';
           }
+          unit.data = this.discardEPB(unit.data);
           expGolombDecoder = new ExpGolomb(unit.data);
 
           // skip frameType
@@ -528,6 +529,9 @@
           }
           break;
         case 2:
+          // if(value === 3) {
+          //   hasEmulation = true;
+          // }
         case 3:
           if( value === 0) {
             state = 3;
@@ -561,7 +565,7 @@
       if (state === 0) {
         unit = {data: array.subarray(lastUnitStart, len), type: lastUnitType};
         units.push(unit);
-        logger.log('pushing NALU, type/size:' + unit.type + '/' + unit.data.byteLength);
+        //logger.log('pushing NALU, type/size:' + unit.type + '/' + unit.data.byteLength);
       } else {
         // potential start code detected at the end of this PES packet. let's treat this as overflow
         logger.log('overflow found');
@@ -571,6 +575,50 @@
       underFlowData = array;
     }
     return { units : units , underflow : underFlowData, overflow : overFlowData};
+  }
+
+  /**
+   * remove Emulation Prevention bytes from a RBSP
+   */
+  discardEPB(data) {
+    var length = data.byteLength,
+        EPBPositions = [],
+        i = 1,
+        newLength, newData;
+
+    // Find all `Emulation Prevention Bytes`
+    while (i < length - 2) {
+      if (data[i] === 0 &&
+          data[i + 1] === 0 &&
+          data[i + 2] === 0x03) {
+        EPBPositions.push(i + 2);
+        i += 2;
+      } else {
+        i++;
+      }
+    }
+
+    // If no Emulation Prevention Bytes were found just return the original
+    // array
+    if (EPBPositions.length === 0) {
+      return data;
+    }
+
+    // Create a new array to hold the NAL unit data
+    newLength = length - EPBPositions.length;
+    newData = new Uint8Array(newLength);
+    var sourceIndex = 0;
+
+    for (i = 0; i < newLength; sourceIndex++, i++) {
+      if (sourceIndex === EPBPositions[0]) {
+        // Skip this byte
+        sourceIndex++;
+        // Remove this position index
+        EPBPositions.shift();
+      }
+      newData[i] = data[sourceIndex];
+    }
+    return newData;
   }
 
   _parseAACPES(pes) {
