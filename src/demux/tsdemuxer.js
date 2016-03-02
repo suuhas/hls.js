@@ -587,10 +587,11 @@
         newLength, newData;
 
     // Find all `Emulation Prevention Bytes`
-    while (i < length - 2) {
+    while (i < length - 3) {
       if (data[i] === 0 &&
           data[i + 1] === 0 &&
-          data[i + 2] === 0x03) {
+          data[i + 2] === 0x03 &&
+          (!data[i + 3]) && data[i + 3] < 0x4) {
         EPBPositions.push(i + 2);
         i += 2;
       } else {
